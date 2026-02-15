@@ -6,3 +6,5 @@ xarray>=2023.6
 netCDF4>=1.6
 matplotlib>=3.7
 scipy>=1.10
+cfgrib
+ecmwflibs
