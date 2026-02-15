@@ -216,7 +216,7 @@ if (out / "cape_latest.png").exists():
 if (out / "shear_1000_500_latest.png").exists():
     st.image(str(out / "shear_1000_500_latest.png"), caption="Shear proxy (cached)")
 
-st.subheader("Map:st.subheader("Map: Surface CAPE (GFS capesfc)
+st.subheader("Map:st.subheader("Map: Surface CAPE (GFS capesfc)")
 latest = read_latest(CACHE_DIR)
 if latest and "url" in latest:
     try:
@@ -271,4 +271,3 @@ if latest and "url" in latest:
         st.error(f"Could not open/plot OPeNDAP dataset: {e}")
 else:
     st.info("Select the latest dataset above to see the live CAPE map.")
-
