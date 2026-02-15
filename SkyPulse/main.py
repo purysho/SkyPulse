@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from compute.fields import get_level, bulk_shear_mag
+from viz.maps import plot_scalar_field
+
 import json
 from pathlib import Path
 from datetime import datetime, timezone
@@ -283,7 +286,7 @@ elif map_choice == "Shear" and (maps_path / "shear_1000_500_latest.png").exists(
     st.image(str(maps_path / "shear_1000_500_latest.png"), caption="Bulk Shear Proxy")
 
 st.subheader("Signals Feed")
-signals_file = pathlib.Path(CACHE_DIR) / "signals.json"
+signals_file = Path(CACHE_DIR) / "signals.json"
 if signals_file.exists():
     data = json.loads(signals_file.read_text())
     for s in data.get("signals", []):
