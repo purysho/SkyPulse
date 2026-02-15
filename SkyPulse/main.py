@@ -5,13 +5,10 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 import streamlit as st
+import streamlit.components.v1 as components
 import xarray as xr
-
-from compute.indices import simple_hail_score, simple_tornado_score
 from ingest.gfs_opendap import find_latest_gfs_anl_0p25, open_gfs_dataset
-from app.state import write_latest, read_latest
-from viz.maps import plot_scalar_field
-
+from app.state import write_latest, read_latest, minutes_since_update, maps_dir
 CONFIG_PATH = Path(__file__).parent / "app" / "config.json"
 
 st.set_page_config(page_title="SkyPulse (Alpha)", layout="wide")
@@ -20,8 +17,7 @@ st.set_page_config(page_title="SkyPulse (Alpha)", layout="wide")
 def load_config():
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
-cfg = load_config()
-CACHE_DIR = cfg.get("cache_dir", "data_cache")
+CACHE_DIR = cfg.get('cache_dir', 'data_cache')
 st.title("SkyPulse — Severe Weather & Atmospheric Intelligence (Alpha)")
 st.caption("Starter scaffold: we’ll wire in live model ingest + maps next.")
 
@@ -37,29 +33,67 @@ with colB:
     st.write("Refresh interval (minutes):", cfg.get("refresh_minutes", 60))
     st.write("Cache dir:", cfg.get("cache_dir", "data_cache"))
 
-st.subheader("Live Model Data (Step 1) — GFS via OPeNDAP (cloud-safe)")
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    if st.button("Find latest GFS analysis + update"):
-        try:
-            run = find_latest_gfs_anl_0p25(days_back=2)
-            write_latest(CACHE_DIR, {"source": "NOMADS OPeNDAP GFS 0.25° (analysis)", "ymd": run.ymd, "cycle": run.cycle, "url": run.url})
-            st.success(f"Latest found: {run.ymd} {run.cycle}Z")
-        except Exception as e:
-            st.error(f"Failed to locate latest dataset: {e}")
+st.subheader("Auto Update")
+auto_update = st.toggle("Auto-update model & maps when stale", value=True)
+auto_rerun = st.toggle("Auto-rerun page (keeps it live)", value=True)
+refresh_min = st.number_input(
+    "Refresh interval (minutes)",
+    min_value=5,
+    max_value=180,
+    value=int(cfg.get("refresh_minutes", 60)),
+    step=5,
+)
 
 latest = read_latest(CACHE_DIR)
+age = minutes_since_update(latest)
 
-with col2:
-    if latest and "url" in latest:
-        st.write("Latest dataset:", f"{latest.get('ymd','')} {latest.get('cycle','')}Z")
-        st.code(latest["url"])
-    else:
-        st.info("No dataset selected yet — click the button.")
+if latest and age is not None:
+    st.caption(f"Last update: {latest.get('updated_at_utc','?')}  (age: {age:.1f} min)")
+else:
+    st.caption("No updates yet.")
+
+def do_update():
+    run = find_latest_gfs_anl_0p25(days_back=2)
+    write_latest(
+        CACHE_DIR,
+        {
+            "source": "NOMADS OPeNDAP GFS 0.25° (analysis)",
+            "ymd": run.ymd,
+            "cycle": run.cycle,
+            "url": run.url,
+        },
+    )
+    return run
+
+# Auto-update if stale (or missing)
+if auto_update and (age is None or age > float(refresh_min)):
+    with st.spinner("Updating to latest GFS run..."):
+        run = do_update()
+        st.success(f"Updated: {run.ymd} {run.cycle}Z")
+
+# Optional auto-rerun (browser refresh) so the page stays live even if no one clicks.
+# This is Streamlit Cloud-friendly: it just reloads the page in the user's browser.
+if auto_rerun:
+    components.html(
+        f"""
+        <script>
+          setTimeout(function() {{
+            window.location.reload();
+          }}, {int(refresh_min) * 60 * 1000});
+        </script>
+        """,
+        height=0,
+    )
 
 
 st.divider()
+
+st.subheader("Manual Update")
+if st.button("Update now"):
+    with st.spinner("Updating..."):
+        run = do_update()
+        st.success(f"Updated: {run.ymd} {run.cycle}Z")
+
 
 st.subheader("Nowcast Card (demo logic)")
 st.write("Right now these are manual inputs. Next step: pull GFS/HRRR fields and interpolate values at a clicked point.")
