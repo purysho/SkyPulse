@@ -1,0 +1,16 @@
+# Core
+streamlit
+numpy
+pandas
+requests
+matplotlib
+pillow
+
+# Scientific
+xarray
+netCDF4
+scipy
+
+# GRIB2 decode for MRMS
+cfgrib
+eccodes
