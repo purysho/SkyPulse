@@ -8,6 +8,7 @@ import streamlit.components.v1 as components
 
 from services.config import load_config
 from services.model import update_and_render
+from services.storms import run_storm_detection
 from app.state import read_latest, minutes_since_update
 
 from ui.maps_tab import render_maps_tab
@@ -40,6 +41,8 @@ refresh_min = st.number_input(
     step=5,
 )
 
+auto_storms = st.toggle("Auto-detect storm objects after update", value=True)
+
 latest = read_latest(cache_dir)
 age = minutes_since_update(latest)
 
@@ -58,7 +61,16 @@ else:
 
 def run_update():
     run, _stats = update_and_render(cfg, cache_dir)
+
+    # Auto storm detection (Composite-object tracking)
+    if auto_storms:
+        try:
+            run_storm_detection(cache_dir, threshold=6.0, min_pixels=12)
+        except Exception:
+            pass
+
     return run
+
 
 if auto_update and (age is None or age > float(refresh_min)):
     with st.spinner("Updating to latest GFS analysis and generating maps..."):
