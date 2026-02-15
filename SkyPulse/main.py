@@ -8,6 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import xarray as xr
 from compute.indices import simple_hail_score, simple_tornado_score
+from viz.maps import plot_scalar_field
 from ingest.gfs_opendap import find_latest_gfs_anl_0p25, open_gfs_dataset
 from app.state import write_latest, read_latest, minutes_since_update, maps_dir
 CONFIG_PATH = Path(__file__).parent / "app" / "config.json"
