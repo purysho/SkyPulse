@@ -29,6 +29,7 @@ from compute.signals import build_domain_stats, generate_signals
 from compute.verify import build_bias_table
 from compute.boundaries import compute_boundary_candidates, grid_boundary_field
 from compute.geo import parse_candidates, nearest_candidate
+from compute.watch import initiation_watch_score
 
 from viz.maps import plot_scalar_field
 from viz.render import save_fig
@@ -242,6 +243,35 @@ with tab_nowcast:
                     st.caption("Boundary proximity: run the Signals tab once to generate boundary candidates.")
             except Exception as e:
                 st.caption(f"Boundary proximity unavailable: {e}")
+# Initiation Watch (0–10) — combines ingredients + boundary proximity + moisture-bias confidence
+try:
+    dew_bias = None
+    bfile2 = Path(CACHE_DIR) / "metar_bias_latest.json"
+    if bfile2.exists():
+        bsum = json.loads(bfile2.read_text(encoding="utf-8"))
+        dew_bias = (bsum.get("dewpoint_bias_c", {}) or {}).get("median")
+
+    # Reuse dist_km from above if available
+    try:
+        _dist = dist_km  # type: ignore[name-defined]
+    except Exception:
+        _dist = None
+
+    score, reasons = initiation_watch_score(
+        cape_jkg=cape_val,
+        shear_ms=shear_val,
+        boundary_dist_km=_dist,
+        dewpoint_bias_c_median=dew_bias,
+    )
+    st.subheader("Initiation Watch (0–10)")
+    if score is None:
+        st.info("Initiation Watch needs CAPE + shear.")
+    else:
+        st.metric("Score", f"{score:.1f}")
+        st.caption("Signals: " + ", ".join(reasons))
+except Exception as e:
+    st.caption(f"Initiation Watch unavailable: {e}")
+
 
         except Exception as e:
             st.error(f"Nowcast failed: {e}")
@@ -293,6 +323,18 @@ with tab_signals:
             show["abs_temp_bias"] = show["temp_bias_c"].abs()
             show = show.sort_values("abs_temp_bias", ascending=False).head(10)
             st.dataframe(show, use_container_width=True)
+
+# Cache bias summary for Nowcast confidence adjustments
+try:
+    bias_file = Path(CACHE_DIR) / "metar_bias_latest.json"
+    bias_payload = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "temp_bias_c": summary.get("temp_bias_c", {}),
+        "dewpoint_bias_c": summary.get("dewpoint_bias_c", {}),
+    }
+    bias_file.write_text(json.dumps(bias_payload, indent=2), encoding="utf-8")
+except Exception:
+    pass
 
             if db.get("median") is not None and abs(db["median"]) >= 1.5:
                 st.warning(
