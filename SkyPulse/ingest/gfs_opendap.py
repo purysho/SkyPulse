@@ -53,3 +53,12 @@ def open_gfs_dataset(url: str):
     import xarray as xr
     # Using netCDF4 backend is the most reliable on Streamlit Cloud
     return xr.open_dataset(url)
+
+def coord_names(ds):
+    """Return (lon_name, lat_name) coordinate names for a dataset."""
+    lon = "lon" if "lon" in ds.coords else ("longitude" if "longitude" in ds.coords else None)
+    lat = "lat" if "lat" in ds.coords else ("latitude" if "latitude" in ds.coords else None)
+    if lon is None or lat is None:
+        raise KeyError(f"Could not find lon/lat coords. Coords: {list(ds.coords)}")
+    return lon, lat
+

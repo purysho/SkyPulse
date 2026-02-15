@@ -1,3 +1,4 @@
+from compute.fields import get_level, bulk_shear_mag
 from __future__ import annotations
 
 import json
@@ -7,9 +8,7 @@ from datetime import datetime, timezone
 import streamlit as st
 import streamlit.components.v1 as components
 import xarray as xr
-from compute.indices import simple_hail_score, simple_tornado_score
-from viz.maps import plot_scalar_field
-from ingest.gfs_opendap import find_latest_gfs_anl_0p25, open_gfs_dataset
+from ingest.gfs_opendap import find_latest_gfs_anl_0p25, open_gfs_dataset, coord_names
 from app.state import write_latest, read_latest, minutes_since_update, maps_dir
 CONFIG_PATH = Path(__file__).parent / "app" / "config.json"
 
@@ -21,6 +20,65 @@ def load_config():
 
 cfg = load_config()
 CACHE_DIR = cfg.get("cache_dir", "data_cache")
+
+
+def subset_to_bbox(ds, field, lon_name: str, lat_name: str):
+    """Subset a field to cfg bbox. Returns (field_sub, lons_plot, lats_sub)."""
+    bbox = cfg["region"]["bbox"]
+    lon_min = bbox["lon_min"] % 360
+    lon_max = bbox["lon_max"] % 360
+    lat_min = bbox["lat_min"]
+    lat_max = bbox["lat_max"]
+
+    if lon_min <= lon_max:
+        f_sub = field.sel(**{lat_name: slice(lat_min, lat_max), lon_name: slice(lon_min, lon_max)})
+        lons_sub = ds[lon_name].sel(**{lon_name: slice(lon_min, lon_max)})
+    else:
+        f_a = field.sel(**{lat_name: slice(lat_min, lat_max), lon_name: slice(lon_min, 359.75)})
+        f_b = field.sel(**{lat_name: slice(lat_min, lat_max), lon_name: slice(0, lon_max)})
+        f_sub = xr.concat([f_a, f_b], dim=lon_name)
+        lons_sub = xr.concat(
+            [
+                ds[lon_name].sel(**{lon_name: slice(lon_min, 359.75)}),
+                ds[lon_name].sel(**{lon_name: slice(0, lon_max)}),
+            ],
+            dim=lon_name,
+        )
+
+    lats_sub = ds[lat_name].sel(**{lat_name: slice(lat_min, lat_max)})
+    lons_plot = ((lons_sub + 180) % 360) - 180
+    return f_sub, lons_plot, lats_sub
+
+
+def render_maps(ds):
+    """Render and cache multiple maps as PNGs in data_cache/maps."""
+    lon_name, lat_name = coord_names(ds)
+    out = maps_dir(CACHE_DIR)
+
+    # 1) Surface CAPE
+    if "capesfc" in ds:
+        cape = ds["capesfc"]
+        if "time" in cape.dims:
+            cape = cape.isel(time=0)
+        cape_sub, lons, lats = subset_to_bbox(ds, cape, lon_name, lat_name)
+        fig = plot_scalar_field(lons, lats, cape_sub, title="Surface CAPE", units="J/kg")
+        save_fig(fig, out / "cape_latest.png")
+
+    # 2) Bulk shear proxy (1000 -> 500 hPa) from ugrdprs/vgrdprs
+    if "ugrdprs" in ds and "vgrdprs" in ds:
+        u = ds["ugrdprs"]
+        v = ds["vgrdprs"]
+        if "time" in u.dims:
+            u = u.isel(time=0)
+            v = v.isel(time=0)
+        u_lo = get_level(u, 1000.0)
+        v_lo = get_level(v, 1000.0)
+        u_hi = get_level(u, 500.0)
+        v_hi = get_level(v, 500.0)
+        shear = bulk_shear_mag(u_lo, v_lo, u_hi, v_hi)
+        shear_sub, lons, lats = subset_to_bbox(ds, shear, lon_name, lat_name)
+        fig = plot_scalar_field(lons, lats, shear_sub, title="Bulk shear (1000–500 hPa proxy)", units="m/s")
+        save_fig(fig, out / "shear_1000_500_latest.png")
 st.title("SkyPulse — Severe Weather & Atmospheric Intelligence (Alpha)")
 st.caption("Starter scaffold: we’ll wire in live model ingest + maps next.")
 
@@ -98,28 +156,67 @@ if st.button("Update now"):
         st.success(f"Updated: {run.ymd} {run.cycle}Z")
 
 
-st.subheader("Nowcast Card (demo logic)")
-st.write("Right now these are manual inputs. Next step: pull GFS/HRRR fields and interpolate values at a clicked point.")
+st.subheader("Nowcast Card (from model)")
 
-c1, c2, c3 = st.columns(3)
-with c1:
-    cape = st.number_input("CAPE (J/kg)", min_value=0.0, max_value=8000.0, value=1500.0, step=50.0)
-with c2:
-    shear06 = st.number_input("0–6 km bulk shear (m/s)", min_value=0.0, max_value=60.0, value=20.0, step=1.0)
-with c3:
-    lcl = st.number_input("LCL (m)", min_value=0.0, max_value=4000.0, value=1200.0, step=50.0)
+lat = st.number_input("Latitude", value=33.0, step=0.1, format="%.3f")
+lon = st.number_input("Longitude", value=-97.0, step=0.1, format="%.3f")
 
-c4, c5 = st.columns(2)
-with c4:
-    srh01 = st.number_input("0–1 km SRH (m²/s²)", min_value=0.0, max_value=600.0, value=100.0, step=10.0)
-with c5:
-    st.write("Composite signals (toy)")
-    st.metric("Hail score (0–10)", simple_hail_score(cape, shear06))
-    st.metric("Tornado score (0–10)", simple_tornado_score(cape, srh01, lcl))
+latest = read_latest(CACHE_DIR)
+if latest and "url" in latest:
+    try:
+        ds = open_gfs_dataset(latest["url"])
+        lon_name, lat_name = coord_names(ds)
+        lon360 = lon % 360
 
-st.info("Next bullet: implement model ingest + generate live maps that update automatically (Streamlit Cloud-friendly).")
+        # CAPE
+        cape_val = None
+        if "capesfc" in ds:
+            cap = ds["capesfc"]
+            if "time" in cap.dims:
+                cap = cap.isel(time=0)
+            cape_val = float(cap.interp(**{lat_name: lat, lon_name: lon360}).values)
 
-st.subheader("Map: Surface CAPE (GFS capesfc)")
+        # Shear proxy (1000->500 hPa)
+        shear_val = None
+        if "ugrdprs" in ds and "vgrdprs" in ds:
+            u = ds["ugrdprs"]; v = ds["vgrdprs"]
+            if "time" in u.dims:
+                u = u.isel(time=0); v = v.isel(time=0)
+            u_lo = get_level(u, 1000.0); v_lo = get_level(v, 1000.0)
+            u_hi = get_level(u, 500.0);  v_hi = get_level(v, 500.0)
+            shear = bulk_shear_mag(u_lo, v_lo, u_hi, v_hi)
+            shear_val = float(shear.interp(**{lat_name: lat, lon_name: lon360}).values)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if cape_val is not None:
+                st.metric("CAPE (J/kg)", round(cape_val, 1))
+            else:
+                st.metric("CAPE (J/kg)", "N/A")
+        with c2:
+            if shear_val is not None:
+                st.metric("Shear proxy (m/s)", round(shear_val, 2))
+            else:
+                st.metric("Shear proxy (m/s)", "N/A")
+        with c3:
+            if cape_val is not None and shear_val is not None:
+                st.metric("Hail score (0–10)", simple_hail_score(cape_val, shear_val))
+            else:
+                st.metric("Hail score (0–10)", "N/A")
+
+    except Exception as e:
+        st.error(f"Nowcast failed: {e}")
+else:
+    st.info("No dataset yet — wait for auto-update or press Update now.")
+
+st.subheader("Latest cached maps")
+out = maps_dir(CACHE_DIR)
+if (out / "cape_latest.png").exists():
+    st.image(str(out / "cape_latest.png"), caption="CAPE (cached)")
+if (out / "shear_1000_500_latest.png").exists():
+    st.image(str(out / "shear_1000_500_latest.png"), caption="Shear proxy (cached)")
+
+st.subheader("Map:st.subheader("Map: Surface CAPE (GFS capesfc)")
 latest = read_latest(CACHE_DIR)
 if latest and "url" in latest:
     try:
