@@ -10,7 +10,6 @@ from services.storms import run_storm_detection
 from app.state import maps_dir
 from compute.impact import impact_hits
 
-STORMS_TAB_VERSION = "impact-v1"
 
 def render_storms_tab(cfg: dict, cache_dir: str):
     st.subheader("Storm Objects + Tracking (radar-like)")
@@ -19,7 +18,6 @@ def render_storms_tab(cfg: dict, cache_dir: str):
         "Tracking = nearest-centroid matching. "
         "Motion = centroid-to-centroid between snapshots (constant motion extrapolation)."
     )
-    st.caption(f"UI module: {STORMS_TAB_VERSION}")
 
     threshold = st.slider("Object threshold (Composite)", 0.0, 10.0, 6.0, 0.1)
     min_pixels = st.slider("Min object size (pixels)", 3, 200, 12, 1)
@@ -54,6 +52,7 @@ def render_storms_tab(cfg: dict, cache_dir: str):
             cur = cur[k]
         return cur
 
+    # Flatten motion/forecast/cone fields (handle older payloads gracefully)
     if "motion" in df:
         df["speed_kmh"] = df["motion"].apply(lambda m: _get(m, ["speed_kmh"]))
         df["bearing_deg"] = df["motion"].apply(lambda m: _get(m, ["bearing_deg"]))
@@ -65,27 +64,26 @@ def render_storms_tab(cfg: dict, cache_dir: str):
         df["f60_lat"] = df["forecast_60min"].apply(lambda f: _get(f, ["lat"]))
         df["f60_lon"] = df["forecast_60min"].apply(lambda f: _get(f, ["lon"]))
 
-    # Uncertainty cone radii (km)
-    if "cone_30_km" in df:
-        df["cone_30_km"] = df["cone_30_km"]
-    if "cone_60_km" in df:
-        df["cone_60_km"] = df["cone_60_km"]
-
     show_cols = [
         "id","lat","lon","area_km2","max_composite","mean_composite",
-        "speed_kmh","bearing_deg","dt_min","f30_lat","f30_lon","f60_lat","f60_lon",
-        "cone_30_km","cone_60_km"
+        "speed_kmh","bearing_deg","dt_min",
+        "f30_lat","f30_lon","f60_lat","f60_lon",
+        "cone_30_km","cone_60_km",
     ]
     show_cols = [c for c in show_cols if c in df.columns]
-    df = df[show_cols].sort_values(["max_composite","area_km2"], ascending=[False, False], ignore_index=True)
-    st.dataframe(df, use_container_width=True)
+    df_show = df[show_cols].copy()
+    if "max_composite" in df_show.columns and "area_km2" in df_show.columns:
+        df_show = df_show.sort_values(["max_composite","area_km2"], ascending=[False, False], ignore_index=True)
+    st.dataframe(df_show, use_container_width=True)
 
     st.divider()
+
+    # -------------------- Impact List --------------------
     st.subheader("Impact list (Who gets hit in ~60 minutes?)")
     st.caption("Define targets (points) and a radius. We check which storms' current→forecast path passes near each target.")
 
     radius = st.slider("Impact radius (km)", 10, 200, 50, 5)
-    mode = st.selectbox("Use", ["forecast_60min","forecast_30min"], index=0)
+    mode = st.selectbox("Use", ["forecast_60min", "forecast_30min"], index=0)
 
     st.write("Enter targets as one per line: `Name,lat,lon` (lon is negative for W)")
     example = "Dallas,32.7767,-96.7970\nOklahoma City,35.4676,-97.5164\nTulsa,36.1540,-95.9928"
@@ -113,8 +111,9 @@ def render_storms_tab(cfg: dict, cache_dir: str):
         st.info("No projected impacts within the selected radius.")
 
     st.divider()
-    st.subheader("Map view (approx)")
 
+    # -------------------- Map View --------------------
+    st.subheader("Map view (approx)")
     md = maps_dir(cache_dir)
     comp_png = md / "composite_latest.png"
     if not comp_png.exists():
@@ -123,8 +122,9 @@ def render_storms_tab(cfg: dict, cache_dir: str):
 
     try:
         import PIL.Image as Image
+
         img = Image.open(comp_png).convert("RGBA")
-        fig = plt.figure(figsize=(10,6))
+        fig = plt.figure(figsize=(10, 6))
         ax = plt.gca()
         ax.imshow(img)
         ax.axis("off")
@@ -139,40 +139,43 @@ def render_storms_tab(cfg: dict, cache_dir: str):
             y = (lat_max - lat) / (lat_max - lat_min) * h
             return x, y
 
-        for _, r in df.iterrows():
-            x, y = xy(float(r["lon"]), float(r["lat"]))
-            ax.scatter([x],[y], s=70)
-            ax.text(x+6, y+6, str(r["id"]), fontsize=10, weight="bold")
+        # rough px/km conversion (demo-grade)
+        import math
+        lon_span = (lon_max - lon_min)
+        lat_span = (lat_max - lat_min)
+        km_per_lon_deg = 111.0 * math.cos(math.radians((lat_min + lat_max) / 2.0))
+        km_per_lat_deg = 111.0
+        px_per_km_x = (w / (lon_span * km_per_lon_deg)) if lon_span != 0 else 0.0
+        px_per_km_y = (h / (lat_span * km_per_lat_deg)) if lat_span != 0 else 0.0
 
-            if "f60_lat" in df.columns and pd.notna(r.get("f60_lat")) and pd.notna(r.get("f60_lon")):
+        for _, r in df_show.iterrows():
+            if "lon" not in r or "lat" not in r:
+                continue
+            x, y = xy(float(r["lon"]), float(r["lat"]))
+            ax.scatter([x], [y], s=70)
+            ax.text(x + 6, y + 6, str(r.get("id","")), fontsize=10, weight="bold")
+
+            # Arrow + circles if forecasts exist
+            if ("f60_lat" in df_show.columns) and pd.notna(r.get("f60_lat")) and pd.notna(r.get("f60_lon")):
                 x2, y2 = xy(float(r["f60_lon"]), float(r["f60_lat"]))
                 ax.annotate("", xy=(x2, y2), xytext=(x, y), arrowprops=dict(arrowstyle="->", lw=2))
-                ax.scatter([x2],[y2], s=40, marker="x")
-                ax.text(x2+6, y2+6, f"{r['id']}+60", fontsize=9)
-# Uncertainty circles (approx) at +30 and +60
-# Convert km to pixels using bbox extent (very rough, demo-grade)
-lon_span = (lon_max - lon_min)
-lat_span = (lat_max - lat_min)
-km_per_lon_deg = 111.0 * __import__("math").cos(__import__("math").radians((lat_min + lat_max) / 2.0))
-km_per_lat_deg = 111.0
-px_per_km_x = (w / (lon_span * km_per_lon_deg)) if lon_span != 0 else 0.0
-px_per_km_y = (h / (lat_span * km_per_lat_deg)) if lat_span != 0 else 0.0
+                ax.scatter([x2], [y2], s=40, marker="x")
+                ax.text(x2 + 6, y2 + 6, f"{r.get('id','')}+60", fontsize=9)
 
-cone60 = r.get("cone_60_km", None)
-if cone60 is not None:
-    rad_px = float(cone60) * (px_per_km_x + px_per_km_y) / 2.0
-    circ = patches.Circle((x2, y2), radius=rad_px, fill=False, linewidth=2, alpha=0.8)
-    ax.add_patch(circ)
+                # cone circles
+                cone60 = r.get("cone_60_km", None)
+                if cone60 is not None and px_per_km_x > 0 and px_per_km_y > 0:
+                    rad_px = float(cone60) * (px_per_km_x + px_per_km_y) / 2.0
+                    ax.add_patch(patches.Circle((x2, y2), radius=rad_px, fill=False, linewidth=2, alpha=0.8))
 
-if ("f30_lat" in df.columns) and pd.notna(r.get("f30_lat")) and pd.notna(r.get("f30_lon")):
-    x30, y30 = xy(float(r["f30_lon"]), float(r["f30_lat"]))
-    cone30 = r.get("cone_30_km", None)
-    if cone30 is not None:
-        rad_px30 = float(cone30) * (px_per_km_x + px_per_km_y) / 2.0
-        circ30 = patches.Circle((x30, y30), radius=rad_px30, fill=False, linewidth=1.5, alpha=0.6)
-        ax.add_patch(circ30)
+                if ("f30_lat" in df_show.columns) and pd.notna(r.get("f30_lat")) and pd.notna(r.get("f30_lon")):
+                    x30, y30 = xy(float(r["f30_lon"]), float(r["f30_lat"]))
+                    cone30 = r.get("cone_30_km", None)
+                    if cone30 is not None and px_per_km_x > 0 and px_per_km_y > 0:
+                        rad_px30 = float(cone30) * (px_per_km_x + px_per_km_y) / 2.0
+                        ax.add_patch(patches.Circle((x30, y30), radius=rad_px30, fill=False, linewidth=1.5, alpha=0.6))
 
         st.pyplot(fig, clear_figure=True)
-        st.caption("Centroids/arrows are approximate on the PNG (bbox-linear mapping). Use Overlay tab for true geospatial context.")
+        st.caption("Centroids/arrows/circles are approximate on the PNG (bbox-linear mapping). Overlay tab is the better geospatial view.")
     except Exception as e:
-        st.warning(f"Could not render motion overlay: {e}")
+        st.warning(f"Could not render map overlay: {e}")
