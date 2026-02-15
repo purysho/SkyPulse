@@ -4,6 +4,7 @@ from dataclasses import dataclass, asdict
 from typing import Any
 import numpy as np
 from scipy import ndimage
+import math
 
 @dataclass
 class StormObject:
@@ -15,10 +16,9 @@ class StormObject:
     mean_composite: float
 
 def _pixel_area_km2(lats: np.ndarray, lons: np.ndarray) -> float:
-    # crude: use median spacing -> km (lat: 111 km/deg; lon scaled by cos(lat))
+    # crude: median spacing -> km (lat: 111 km/deg; lon scaled by cos(lat))
     if lats.size < 2 or lons.size < 2:
         return 1.0
-    # assume 1D coordinate arrays
     dlat = float(np.nanmedian(np.abs(np.diff(lats))))
     dlon = float(np.nanmedian(np.abs(np.diff(lons))))
     lat0 = float(np.nanmedian(lats))
@@ -46,12 +46,11 @@ def detect_objects(
 
     pix_area = _pixel_area_km2(np.array(lats_1d, dtype=float), np.array(lons_1d, dtype=float))
     objs = []
-    for lab in range(1, n+1):
+    for lab in range(1, n + 1):
         ys, xs = np.where(labeled == lab)
         if ys.size < min_pixels:
             continue
         vals = comp[ys, xs]
-        # centroid in index space -> lat/lon
         y0 = int(np.round(np.mean(ys)))
         x0 = int(np.round(np.mean(xs)))
         lat = float(lats_1d[y0])
@@ -61,16 +60,14 @@ def detect_objects(
         vmean = float(np.nanmean(vals))
         objs.append((lat, lon, area, vmax, vmean))
 
-    # sort by max intensity then area
     objs.sort(key=lambda t: (t[3], t[2]), reverse=True)
     return objs
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    import math
     r = 6371.0
     phi1 = math.radians(lat1); phi2 = math.radians(lat2)
-    dphi = math.radians(lat2-lat1)
-    dl = math.radians(lon2-lon1)
+    dphi = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
     a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dl/2)**2
     return 2*r*math.asin(math.sqrt(a))
 
@@ -79,29 +76,56 @@ def track_objects(
     prev: list[dict[str,Any]] | None,
     *,
     max_match_km: float = 60.0,
+    intensity_weight_km_per_unit: float = 8.0,
 ) -> list[StormObject]:
-    """Assign stable IDs by matching to previous objects by nearest centroid."""
+    """
+    Assign stable IDs by matching to previous objects.
+    Uses a combined score:
+      score = distance_km + intensity_weight * |Δmax_composite|
+    This reduces ID swapping when storms are close together.
+    """
     prev = prev or []
     used = set()
     out: list[StormObject] = []
 
     for i, (lat, lon, area, vmax, vmean) in enumerate(current, start=1):
         best = None
+        best_score = None
         best_d = None
+
         for j, pobj in enumerate(prev):
             if j in used:
                 continue
+            if "lat" not in pobj or "lon" not in pobj:
+                continue
             d = haversine_km(lat, lon, float(pobj["lat"]), float(pobj["lon"]))
-            if best_d is None or d < best_d:
+            # intensity similarity term (optional if missing)
+            pvmax = float(pobj.get("max_composite", vmax))
+            di = abs(float(vmax) - pvmax)
+            score = d + intensity_weight_km_per_unit * di
+
+            if best_score is None or score < best_score:
+                best_score = score
                 best_d = d
                 best = (j, pobj)
+
         if best is not None and best_d is not None and best_d <= max_match_km:
             j, pobj = best
             used.add(j)
             sid = str(pobj.get("id", f"S{i:02d}"))
         else:
             sid = f"S{i:02d}"
-        out.append(StormObject(id=sid, lat=lat, lon=lon, area_km2=area, max_composite=vmax, mean_composite=vmean))
+
+        out.append(
+            StormObject(
+                id=sid,
+                lat=float(lat),
+                lon=float(lon),
+                area_km2=float(area),
+                max_composite=float(vmax),
+                mean_composite=float(vmean),
+            )
+        )
 
     return out
 
