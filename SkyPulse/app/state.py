@@ -49,7 +49,6 @@ def maps_dir(cache_dir: str | Path) -> Path:
 
 def write_stats(cache_dir: str | Path, stats: dict) -> None:
     cache_dir = Path(cache_dir)
-    # rotate previous stats
     cur = read_json(cache_dir / STATS_FILE)
     if cur is not None:
         write_json(cache_dir / PREV_STATS_FILE, cur)

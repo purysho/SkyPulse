@@ -4,9 +4,7 @@ import numpy as np
 import xarray as xr
 
 def bulk_shear_mag(u_lo: xr.DataArray, v_lo: xr.DataArray, u_hi: xr.DataArray, v_hi: xr.DataArray) -> xr.DataArray:
-    du = u_hi - u_lo
-    dv = v_hi - v_lo
-    return np.hypot(du, dv)
+    return np.hypot(u_hi - u_lo, v_hi - v_lo)
 
 def get_level(da: xr.DataArray, lev_hpa: float) -> xr.DataArray:
     for lev_name in ["lev", "isobaric", "isobaric1", "level"]:
