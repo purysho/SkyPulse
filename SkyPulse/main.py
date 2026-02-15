@@ -1,3 +1,5 @@
+from compute.fields import get_level, bulk_shear_mag
+from compute.signals import generate_signals
 from __future__ import annotations
 
 import json
@@ -7,14 +9,8 @@ from datetime import datetime, timezone
 import streamlit as st
 import streamlit.components.v1 as components
 import xarray as xr
-
-from app.state import write_latest, read_latest, minutes_since_update, maps_dir
 from ingest.gfs_opendap import find_latest_gfs_anl_0p25, open_gfs_dataset, coord_names
-from compute.indices import simple_hail_score, simple_tornado_score
-from compute.fields import get_level, bulk_shear_mag
-from viz.maps import plot_scalar_field
-from viz.render import save_fig
-
+from app.state import write_latest, read_latest, minutes_since_update, maps_dir
 CONFIG_PATH = Path(__file__).parent / "app" / "config.json"
 
 st.set_page_config(page_title="SkyPulse (Alpha)", layout="wide")
@@ -25,6 +21,7 @@ def load_config():
 
 cfg = load_config()
 CACHE_DIR = cfg.get("cache_dir", "data_cache")
+
 
 def subset_to_bbox(ds, field, lon_name: str, lat_name: str):
     """Subset a field to cfg bbox. Returns (field_sub, lons_plot, lats_sub)."""
@@ -220,7 +217,7 @@ if (out / "cape_latest.png").exists():
 if (out / "shear_1000_500_latest.png").exists():
     st.image(str(out / "shear_1000_500_latest.png"), caption="Shear proxy (cached)")
 
-st.subheader("Map: Surface CAPE (GFS capesfc)")
+st.subheader("Map:st.subheader("Map: Surface CAPE (GFS capesfc)")
 latest = read_latest(CACHE_DIR)
 if latest and "url" in latest:
     try:
@@ -275,3 +272,23 @@ if latest and "url" in latest:
         st.error(f"Could not open/plot OPeNDAP dataset: {e}")
 else:
     st.info("Select the latest dataset above to see the live CAPE map.")
+
+
+
+st.subheader("Map Viewer")
+map_choice = st.selectbox("Select Map", ["CAPE", "Shear"])
+
+maps_path = maps_dir(CACHE_DIR)
+if map_choice == "CAPE" and (maps_path / "cape_latest.png").exists():
+    st.image(str(maps_path / "cape_latest.png"), caption="Surface CAPE")
+elif map_choice == "Shear" and (maps_path / "shear_1000_500_latest.png").exists():
+    st.image(str(maps_path / "shear_1000_500_latest.png"), caption="Bulk Shear Proxy")
+
+st.subheader("Signals Feed")
+signals_file = pathlib.Path(CACHE_DIR) / "signals.json"
+if signals_file.exists():
+    data = json.loads(signals_file.read_text())
+    for s in data.get("signals", []):
+        st.write("•", s)
+else:
+    st.info("Signals will appear after first update.")
