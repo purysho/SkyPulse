@@ -25,6 +25,7 @@ from compute.fields import get_level, bulk_shear_mag
 from compute.indices import simple_hail_score
 from compute.signals import build_domain_stats, generate_signals
 from compute.verify import build_bias_table
+from compute.boundaries import compute_boundary_candidates, grid_boundary_field
 from viz.maps import plot_scalar_field
 from viz.render import save_fig
 
@@ -169,12 +170,13 @@ tab_maps, tab_nowcast, tab_signals = st.tabs(["Maps", "Nowcast", "Signals"])
 
 with tab_maps:
     st.subheader("Map Viewer")
-    choice = st.selectbox("Select map", ["Composite", "CAPE", "Shear"])
+    choice = st.selectbox("Select map", ["Composite", "CAPE", "Shear", "Boundary"])
     md = maps_dir(CACHE_DIR)
     paths = {
         "CAPE": md / "cape_latest.png",
         "Shear": md / "shear_1000_500_latest.png",
         "Composite": md / "composite_latest.png",
+        "Boundary": md / "boundary_latest.png",
     }
     p = paths[choice]
     if p.exists():
@@ -256,6 +258,27 @@ with tab_signals:
             metar_all = fetch_metars_cache()
             metar_box = filter_bbox(metar_all, lat_min=bbox["lat_min"], lat_max=bbox["lat_max"], lon_min=bbox["lon_min"], lon_max=bbox["lon_max"])
             st.write(f"Stations in bbox: {len(metar_box)}")
+st.subheader("Boundary detection (from METAR gradients)")
+try:
+    # Compute station-level gradient scores and top candidates
+    scored, candidates = compute_boundary_candidates(metar_box, top_n=8)
+    bbox = cfg["region"]["bbox"]
+    lons_g, lats_g, bfield = grid_boundary_field(scored, bbox=bbox, res_deg=0.25)
+
+    # Cache a boundary map PNG
+    md = maps_dir(CACHE_DIR)
+    fig = plot_scalar_field(lons_g, lats_g, bfield, title="Boundary likelihood (METAR gradients)", units="0–1")
+    save_fig(fig, md / "boundary_latest.png")
+
+    if candidates:
+        st.write("Top boundary candidates:")
+        for c in candidates[:8]:
+            st.write(f"• {c.kind} boundary near ({c.lat:.2f}, {c.lon:.2f}) — score {c.score:.2f}")
+    else:
+        st.info("No strong boundary candidates detected in this bbox.")
+except Exception as e:
+    st.warning(f"Boundary detection unavailable: {e}")
+
 
             latest2 = read_latest(CACHE_DIR)
             if latest2 and "url" in latest2:
