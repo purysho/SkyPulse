@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import matplotlib.pyplot as plt
 
 def plot_scalar_field(lons, lats, field, *, title: str, units: str = ""):

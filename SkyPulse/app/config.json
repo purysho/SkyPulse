@@ -1,17 +1,13 @@
 {
-  "project": {
-    "name": "SkyPulse",
-    "stage": "Alpha"
-  },
   "region": {
-    "name": "Central/Southeast US (demo box)",
+    "name": "Central/Southeast US (default)",
     "bbox": {
       "lat_min": 25.0,
-      "lat_max": 40.0,
-      "lon_min": -100.0,
+      "lat_max": 42.0,
+      "lon_min": -105.0,
       "lon_max": -75.0
     }
   },
-  "refresh_minutes": 60,
+  "refresh_minutes": 30,
   "cache_dir": "data_cache"
 }

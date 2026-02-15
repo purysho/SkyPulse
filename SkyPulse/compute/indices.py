@@ -1,15 +1,16 @@
 from __future__ import annotations
-import numpy as np
 
-def simple_hail_score(cape_jkg: float, shear_06_ms: float) -> float:
-    """Toy composite score for demo purposes (0–10). Replace with real logic later."""
-    cape = np.clip(cape_jkg / 3000.0, 0, 1)
-    shear = np.clip(shear_06_ms / 40.0, 0, 1)
-    return float(np.round(10.0 * (0.65 * cape + 0.35 * shear), 2))
+def simple_hail_score(cape_jkg: float, shear_ms: float) -> float:
+    # toy scoring: cap at 10
+    score = 0.0
+    score += min(cape_jkg / 300.0, 6.0)     # up to 6 points by CAPE
+    score += min(shear_ms / 5.0, 4.0)       # up to 4 points by shear
+    return round(min(score, 10.0), 1)
 
-def simple_tornado_score(cape_jkg: float, srh_01_m2s2: float, lcl_m: float) -> float:
-    """Toy composite score for demo purposes (0–10)."""
-    cape = np.clip(cape_jkg / 2500.0, 0, 1)
-    srh = np.clip(srh_01_m2s2 / 200.0, 0, 1)
-    lcl = 1.0 - np.clip(lcl_m / 2000.0, 0, 1)  # lower LCL is better
-    return float(np.round(10.0 * (0.4 * cape + 0.4 * srh + 0.2 * lcl), 2))
+def simple_tornado_score(cape_jkg: float, srh01: float, lcl_m: float) -> float:
+    # placeholder; keep for future expansion
+    score = 0.0
+    score += min(cape_jkg / 500.0, 4.0)
+    score += min(srh01 / 50.0, 4.0)
+    score += max(0.0, 2.0 - (lcl_m / 1000.0))  # lower LCL better
+    return round(min(max(score, 0.0), 10.0), 1)
