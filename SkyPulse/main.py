@@ -12,6 +12,7 @@ from services.storms import run_storm_detection
 from app.state import read_latest, minutes_since_update
 
 from ui.maps_tab import render_maps_tab
+from ui.mrms_tab import render_mrms_tab
 from ui.nowcast_tab import render_nowcast_tab
 from ui.signals_tab import render_signals_tab
 from ui.radar_tab import render_radar_tab
@@ -91,7 +92,7 @@ if auto_rerun:
         height=0,
     )
 
-tab_maps, tab_nowcast, tab_overlay, tab_storms, tab_radar, tab_sat, tab_signals = st.tabs(["Maps", "Nowcast", "Overlay", "Storms", "Radar", "Satellite", "Signals"])
+tab_maps, tab_nowcast, tab_overlay, tab_storms, tab_radar, tab_mrms, tab_sat, tab_signals = st.tabs(["Maps", "Nowcast", "Overlay", "Storms", "Radar", "MRMS", "Satellite", "Signals"])
 
 with tab_maps:
     render_maps_tab(cache_dir)
@@ -107,6 +108,9 @@ with tab_storms:
 
 with tab_radar:
     render_radar_tab()
+
+with tab_mrms:
+    render_mrms_tab(cfg, cache_dir)
 
 with tab_sat:
     render_satellite_tab(cfg)
