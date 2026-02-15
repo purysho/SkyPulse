@@ -7,9 +7,11 @@ from datetime import datetime, timezone
 import streamlit as st
 import streamlit.components.v1 as components
 import xarray as xr
+import pandas as pd
 import numpy as np
 
 from ingest.gfs_opendap import find_latest_gfs_anl_0p25, open_gfs_dataset, coord_names
+from ingest.metar_cache import fetch_metars_cache, filter_bbox
 from app.state import (
     write_latest,
     read_latest,
@@ -22,6 +24,7 @@ from app.state import (
 from compute.fields import get_level, bulk_shear_mag
 from compute.indices import simple_hail_score
 from compute.signals import build_domain_stats, generate_signals
+from compute.verify import build_bias_table
 from viz.maps import plot_scalar_field
 from viz.render import save_fig
 
@@ -243,3 +246,45 @@ with tab_signals:
 
         st.subheader("Domain stats")
         st.json(cur)
+
+        st.divider()
+        st.subheader("Model vs METAR (quick verification)")
+        st.caption("Uses AviationWeather.gov current METAR cache; bias = model − observation.")
+
+        try:
+            bbox = cfg["region"]["bbox"]
+            metar_all = fetch_metars_cache()
+            metar_box = filter_bbox(metar_all, lat_min=bbox["lat_min"], lat_max=bbox["lat_max"], lon_min=bbox["lon_min"], lon_max=bbox["lon_max"])
+            st.write(f"Stations in bbox: {len(metar_box)}")
+
+            latest2 = read_latest(CACHE_DIR)
+            if latest2 and "url" in latest2:
+                ds2 = open_gfs_dataset(latest2["url"])
+                lon_name, lat_name = coord_names(ds2)
+                table, summary = build_bias_table(ds2, metar_box, lon_name=lon_name, lat_name=lat_name, max_rows=200)
+
+                cA, cB = st.columns(2)
+                with cA:
+                    tb = summary.get("temp_bias_c", {})
+                    st.metric("Temp bias median (°C)", "N/A" if tb.get("median") is None else f"{tb['median']:+.2f}")
+                    st.caption(f"n={tb.get('n',0)}, p90(|bias|)={tb.get('p90_abs') if tb.get('p90_abs') is not None else 'N/A'}")
+                with cB:
+                    db = summary.get("dewpoint_bias_c", {})
+                    st.metric("Dewpoint bias median (°C)", "N/A" if db.get("median") is None else f"{db['median']:+.2f}")
+                    st.caption(f"n={db.get('n',0)}, p90(|bias|)={db.get('p90_abs') if db.get('p90_abs') is not None else 'N/A'}")
+
+                st.subheader("Worst stations (|temp bias|)")
+                show = table.copy()
+                show["abs_temp_bias"] = (show["temp_bias_c"]).abs()
+                show = show.sort_values("abs_temp_bias", ascending=False).head(10)
+                st.dataframe(show[["station","lat","lon","temp_c","model_temp_c","temp_bias_c","dewpoint_c","model_dewpoint_c","dewpoint_bias_c"]], use_container_width=True)
+
+                # Add a confidence signal if moisture bias large
+                if db.get("median") is not None and abs(db["median"]) >= 1.5:
+                    st.warning(f"Moisture bias note: model dewpoint median bias is {db['median']:+.2f}°C today — composite ingredients may be {'inflated' if db['median']>0 else 'suppressed' }.")
+            else:
+                st.info("Run an update first to verify against the model.")
+
+        except Exception as e:
+            st.error(f"Verification failed: {e}")
+
