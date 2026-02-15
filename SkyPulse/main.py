@@ -15,6 +15,7 @@ from ui.nowcast_tab import render_nowcast_tab
 from ui.signals_tab import render_signals_tab
 from ui.radar_tab import render_radar_tab
 from ui.overlay_tab import render_overlay_tab
+from ui.storms_tab import render_storms_tab
 from ui.satellite_tab import render_satellite_tab
 
 CONFIG_PATH = Path(__file__).parent / "app" / "config.json"
@@ -78,7 +79,7 @@ if auto_rerun:
         height=0,
     )
 
-tab_maps, tab_nowcast, tab_overlay, tab_radar, tab_sat, tab_signals = st.tabs(["Maps", "Nowcast", "Overlay", "Radar", "Satellite", "Signals"])
+tab_maps, tab_nowcast, tab_overlay, tab_storms, tab_radar, tab_sat, tab_signals = st.tabs(["Maps", "Nowcast", "Overlay", "Storms", "Radar", "Satellite", "Signals"])
 
 with tab_maps:
     render_maps_tab(cache_dir)
@@ -88,6 +89,9 @@ with tab_nowcast:
 
 with tab_overlay:
     render_overlay_tab(cfg, cache_dir)
+
+with tab_storms:
+    render_storms_tab(cfg, cache_dir)
 
 with tab_radar:
     render_radar_tab()
