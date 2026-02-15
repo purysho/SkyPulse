@@ -216,7 +216,7 @@ if (out / "cape_latest.png").exists():
 if (out / "shear_1000_500_latest.png").exists():
     st.image(str(out / "shear_1000_500_latest.png"), caption="Shear proxy (cached)")
 
-st.subheader("Map:st.subheader("Map: Surface CAPE (GFS capesfc)")")
+st.subheader("Map:st.subheader("Map: Surface CAPE (GFS capesfc)")
 latest = read_latest(CACHE_DIR)
 if latest and "url" in latest:
     try:
