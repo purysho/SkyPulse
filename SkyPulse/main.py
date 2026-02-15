@@ -17,7 +17,8 @@ st.set_page_config(page_title="SkyPulse (Alpha)", layout="wide")
 def load_config():
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
-CACHE_DIR = cfg.get('cache_dir', 'data_cache')
+cfg = load_config()
+CACHE_DIR = cfg.get("cache_dir", "data_cache")
 st.title("SkyPulse — Severe Weather & Atmospheric Intelligence (Alpha)")
 st.caption("Starter scaffold: we’ll wire in live model ingest + maps next.")
 
