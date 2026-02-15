@@ -13,6 +13,7 @@ from app.state import read_latest, minutes_since_update
 from ui.maps_tab import render_maps_tab
 from ui.nowcast_tab import render_nowcast_tab
 from ui.signals_tab import render_signals_tab
+from ui.radar_tab import render_radar_tab
 from ui.satellite_tab import render_satellite_tab
 
 CONFIG_PATH = Path(__file__).parent / "app" / "config.json"
@@ -76,13 +77,16 @@ if auto_rerun:
         height=0,
     )
 
-tab_maps, tab_nowcast, tab_sat, tab_signals = st.tabs(["Maps", "Nowcast", "Satellite", "Signals"])
+tab_maps, tab_nowcast, tab_radar, tab_sat, tab_signals = st.tabs(["Maps", "Nowcast", "Radar", "Satellite", "Signals"])
 
 with tab_maps:
     render_maps_tab(cache_dir)
 
 with tab_nowcast:
     render_nowcast_tab(cfg, cache_dir, latest)
+
+with tab_radar:
+    render_radar_tab()
 
 with tab_sat:
     render_satellite_tab(cfg)
