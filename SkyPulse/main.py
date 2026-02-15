@@ -239,96 +239,106 @@ with tab_signals:
     st.subheader("Signals Feed")
     cur = read_stats(CACHE_DIR)
     prev = read_prev_stats(CACHE_DIR)
+
     if cur is None:
         st.info("Signals will appear after the first update (composite requires both CAPE and shear).")
-    else:
-        sigs = generate_signals(cur, prev)
-        for line in sigs:
-            st.write("•", line)
+        st.stop()
 
-        st.subheader("Domain stats")
-        st.json(cur)
+    sigs = generate_signals(cur, prev)
+    for line in sigs:
+        st.write("•", line)
 
-        st.divider()
-        st.subheader("Model vs METAR (quick verification)")
-        st.caption("Uses AviationWeather.gov current METAR cache; bias = model − observation.")
+    st.subheader("Domain stats")
+    st.json(cur)
 
-        try:
-            bbox = cfg["region"]["bbox"]
-            metar_all = fetch_metars_cache()
-            metar_box = filter_bbox(metar_all, lat_min=bbox["lat_min"], lat_max=bbox["lat_max"], lon_min=bbox["lon_min"], lon_max=bbox["lon_max"])
-            st.write(f"Stations in bbox: {len(metar_box)}")
+    st.divider()
+    st.subheader("Model vs METAR (quick verification)")
+    st.caption("Uses AviationWeather.gov current METAR cache; bias = model − observation.")
 
-except Exception as e:
-    st.warning(f"Boundary detection unavailable: {e}")
+    # --- Verification block ---
+    try:
+        bbox = cfg["region"]["bbox"]
+        metar_all = fetch_metars_cache()
+        metar_box = filter_bbox(
+            metar_all,
+            lat_min=bbox["lat_min"],
+            lat_max=bbox["lat_max"],
+            lon_min=bbox["lon_min"],
+            lon_max=bbox["lon_max"],
+        )
+        st.write(f"Stations in bbox: {len(metar_box)}")
 
+        latest2 = read_latest(CACHE_DIR)
+        if latest2 and "url" in latest2:
+            ds2 = open_gfs_dataset(latest2["url"])
+            lon_name, lat_name = coord_names(ds2)
+            table, summary = build_bias_table(ds2, metar_box, lon_name=lon_name, lat_name=lat_name, max_rows=200)
 
-            latest2 = read_latest(CACHE_DIR)
-            if latest2 and "url" in latest2:
-                ds2 = open_gfs_dataset(latest2["url"])
-                lon_name, lat_name = coord_names(ds2)
-                table, summary = build_bias_table(ds2, metar_box, lon_name=lon_name, lat_name=lat_name, max_rows=200)
+            cA, cB = st.columns(2)
+            with cA:
+                tb = summary.get("temp_bias_c", {})
+                st.metric("Temp bias median (°C)", "N/A" if tb.get("median") is None else f"{tb['median']:+.2f}")
+                st.caption(f"n={tb.get('n',0)}, p90(|bias|)={tb.get('p90_abs') if tb.get('p90_abs') is not None else 'N/A'}")
+            with cB:
+                db = summary.get("dewpoint_bias_c", {})
+                st.metric("Dewpoint bias median (°C)", "N/A" if db.get("median") is None else f"{db['median']:+.2f}")
+                st.caption(f"n={db.get('n',0)}, p90(|bias|)={db.get('p90_abs') if db.get('p90_abs') is not None else 'N/A'}")
 
-                cA, cB = st.columns(2)
-                with cA:
-                    tb = summary.get("temp_bias_c", {})
-                    st.metric("Temp bias median (°C)", "N/A" if tb.get("median") is None else f"{tb['median']:+.2f}")
-                    st.caption(f"n={tb.get('n',0)}, p90(|bias|)={tb.get('p90_abs') if tb.get('p90_abs') is not None else 'N/A'}")
-                with cB:
-                    db = summary.get("dewpoint_bias_c", {})
-                    st.metric("Dewpoint bias median (°C)", "N/A" if db.get("median") is None else f"{db['median']:+.2f}")
-                    st.caption(f"n={db.get('n',0)}, p90(|bias|)={db.get('p90_abs') if db.get('p90_abs') is not None else 'N/A'}")
-
-                st.subheader("Worst stations (|temp bias|)")
-                show = table.copy()
-                show["abs_temp_bias"] = (show["temp_bias_c"]).abs()
-                show = show.sort_values("abs_temp_bias", ascending=False).head(10)
-                st.dataframe(show[["station","lat","lon","temp_c","model_temp_c","temp_bias_c","dewpoint_c","model_dewpoint_c","dewpoint_bias_c"]], use_container_width=True)
-
-                # Add a confidence signal if moisture bias large
-                if db.get("median") is not None and abs(db["median"]) >= 1.5:
-                    st.warning(f"Moisture bias note: model dewpoint median bias is {db['median']:+.2f}°C today — composite ingredients may be {'inflated' if db['median']>0 else 'suppressed' }.")
-            else:
-                st.info("Run an update first to verify against the model.")
-
-        except Exception as e:
-            st.error(f"Verification failed: {e}")
-
-st.divider()
-st.subheader("Boundary detection (from METAR gradients)")
-
-try:
-    bbox = cfg["region"]["bbox"]
-    metar_all = fetch_metars_cache()
-    metar_box = filter_bbox(
-        metar_all,
-        lat_min=bbox["lat_min"],
-        lat_max=bbox["lat_max"],
-        lon_min=bbox["lon_min"],
-        lon_max=bbox["lon_max"],
-    )
-
-    scored, candidates = compute_boundary_candidates(metar_box, top_n=8)
-    lons_g, lats_g, bfield = grid_boundary_field(scored, bbox=bbox, res_deg=0.25)
-
-    md = maps_dir(CACHE_DIR)
-    fig = plot_scalar_field(
-        lons_g,
-        lats_g,
-        bfield,
-        title="Boundary likelihood (METAR gradients)",
-        units="0–1",
-    )
-    save_fig(fig, md / "boundary_latest.png")
-
-    if candidates:
-        st.write("Top boundary candidates:")
-        for c in candidates:
-            st.write(
-                f"• {c.kind} boundary near ({c.lat:.2f}, {c.lon:.2f}) — score {c.score:.2f}"
+            st.subheader("Worst stations (|temp bias|)")
+            show = table.copy()
+            show["abs_temp_bias"] = (show["temp_bias_c"]).abs()
+            show = show.sort_values("abs_temp_bias", ascending=False).head(10)
+            st.dataframe(
+                show[["station","lat","lon","temp_c","model_temp_c","temp_bias_c","dewpoint_c","model_dewpoint_c","dewpoint_bias_c"]],
+                use_container_width=True
             )
-    else:
-        st.info("No strong boundary candidates detected.")
 
-except Exception as e:
-    st.warning(f"Boundary detection unavailable: {e}")
+            # Moisture-bias confidence note
+            if db.get("median") is not None and abs(db["median"]) >= 1.5:
+                st.warning(
+                    f"Moisture bias note: model dewpoint median bias is {db['median']:+.2f}°C today — "
+                    f"composite ingredients may be {'inflated' if db['median']>0 else 'suppressed'}."
+                )
+        else:
+            st.info("Run an update first to verify against the model.")
+
+    except Exception as e:
+        st.error(f"Verification failed: {e}")
+
+    # --- Boundary block (separate try/except, still inside tab_signals) ---
+    st.divider()
+    st.subheader("Boundary detection (from METAR gradients)")
+
+    try:
+        bbox = cfg["region"]["bbox"]
+        metar_all = fetch_metars_cache()
+        metar_box = filter_bbox(
+            metar_all,
+            lat_min=bbox["lat_min"],
+            lat_max=bbox["lat_max"],
+            lon_min=bbox["lon_min"],
+            lon_max=bbox["lon_max"],
+        )
+
+        scored, candidates = compute_boundary_candidates(metar_box, top_n=8)
+        lons_g, lats_g, bfield = grid_boundary_field(scored, bbox=bbox, res_deg=0.25)
+
+        md = maps_dir(CACHE_DIR)
+        fig = plot_scalar_field(
+            lons_g,
+            lats_g,
+            bfield,
+            title="Boundary likelihood (METAR gradients)",
+            units="0–1",
+        )
+        save_fig(fig, md / "boundary_latest.png")
+
+        if candidates:
+            st.write("Top boundary candidates:")
+            for c in candidates:
+                st.write(f"• {c.kind} boundary near ({c.lat:.2f}, {c.lon:.2f}) — score {c.score:.2f}")
+        else:
+            st.info("No strong boundary candidates detected.")
+
+    except Exception as e:
+        st.warning(f"Boundary detection unavailable: {e}")
