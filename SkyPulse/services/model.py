@@ -75,19 +75,19 @@ def update_and_render(cfg: dict, cache_dir: str) -> tuple[dict, dict | None]:
     if cape_sub is not None and shear_sub is not None:
         comp = _composite_0_10(cape_sub, shear_sub)
         save_fig(plot_scalar_field(lons, lats, comp, title="Severe Ingredients Score (Composite)", units="0–10"), out / "composite_latest.png")
-# Persist gridded fields for storm-object detection (cloud-friendly, no re-open needed later)
-try:
-    import numpy as _np
-    _np.savez_compressed(
+        # Persist gridded fields for storm-object detection (cloud-friendly, no re-open needed later)
+        try:
+            import numpy as _np
+            _np.savez_compressed(
         Path(cache_dir) / "storm_fields_latest.npz",
         lons=_np.array(lons),
         lats=_np.array(lats),
         cape=_np.array(cape_sub),
         shear=_np.array(shear_sub),
         composite=_np.array(comp),
-    )
-except Exception:
-    pass
+            )
+        except Exception:
+            pass
 
         stats = build_domain_stats(cape=cape_sub.values, shear=shear_sub.values, composite=comp.values)
         write_stats(cache_dir, stats)
