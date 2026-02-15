@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 import streamlit as st
+import json
 import streamlit.components.v1 as components
 
 from app.state import maps_dir

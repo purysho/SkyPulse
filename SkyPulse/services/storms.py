@@ -113,6 +113,17 @@ def run_storm_detection(cache_dir: str | Path, *, threshold: float = 6.0, min_pi
             f60 = _dest_point(lat2, lon2, bearing, d60)
             o["forecast_30min"] = {"lat": round(f30[0], 4), "lon": round(f30[1], 4)}
             o["forecast_60min"] = {"lat": round(f60[0], 4), "lon": round(f60[1], 4)}
+# Uncertainty cone (simple, explainable heuristic)
+# - baseline grows with lead time
+# - faster motion widens it
+# - larger objects widen it a bit (area proxy)
+area_km2 = float(o.get("area_km2") or 0.0)
+size_term = min((area_km2 ** 0.5) * 0.15, 40.0)  # cap contribution
+speed_term = min(float(speed_kmh) * 0.25, 60.0)  # cap contribution
+base30 = 20.0 + 0.5 * size_term + 0.5 * speed_term
+base60 = 35.0 + 0.8 * size_term + 0.8 * speed_term
+o["cone_30_km"] = round(base30, 1)
+o["cone_60_km"] = round(base60, 1)
 
     payload = {
         "updated_at_utc": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
