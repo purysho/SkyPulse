@@ -1,5 +1,5 @@
 # Core
-streamlit
+streamlit>=1.32,<2
 numpy
 pandas
 requests
@@ -7,10 +7,10 @@ matplotlib
 pillow
 
 # Scientific
-xarray
+xarray>=2024.10
 netCDF4
 scipy
 
-# GRIB2 decode for MRMS
-cfgrib
-eccodes
+# MRMS GRIB2 decode
+cfgrib>=0.9.10.4
+eccodes>=1.7.1

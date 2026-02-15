@@ -1,2 +1,4 @@
+# GRIB / ecCodes runtime (Debian/Ubuntu names used by Streamlit Cloud images)
 libeccodes0
 libeccodes-data
+libeccodes-tools
