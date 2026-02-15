@@ -4,9 +4,8 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 
-\1
 import xarray as xr
-\1from ingest.gfs_opendap import find_latest_gfs_anl_0p25, open_gfs_dataset
+from ingest.gfs_opendap import find_latest_gfs_anl_0p25, open_gfs_dataset
 CONFIG_PATH = Path(__file__).parent / "app" / "config.json"
 
 st.set_page_config(page_title="SkyPulse (Alpha)", layout="wide")
@@ -15,7 +14,6 @@ st.set_page_config(page_title="SkyPulse (Alpha)", layout="wide")
 def load_config():
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
-\1
 CACHE_DIR = cfg.get('cache_dir', 'data_cache')
 st.title("SkyPulse — Severe Weather & Atmospheric Intelligence (Alpha)")
 st.caption("Starter scaffold: we’ll wire in live model ingest + maps next.")
