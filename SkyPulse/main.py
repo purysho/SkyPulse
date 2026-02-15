@@ -26,6 +26,7 @@ from compute.indices import simple_hail_score
 from compute.signals import build_domain_stats, generate_signals
 from compute.verify import build_bias_table
 from compute.boundaries import compute_boundary_candidates, grid_boundary_field
+from compute.geo import parse_candidates, nearest_candidate
 from viz.maps import plot_scalar_field
 from viz.render import save_fig
 
@@ -229,6 +230,24 @@ with tab_nowcast:
                 if cape_val >= 1500: reasons.append("CAPE ≥ 1500")
                 if shear_val >= 20: reasons.append("Shear ≥ 20 m/s")
                 st.caption("Triggered thresholds: " + (", ".join(reasons) if reasons else "None"))
+# Near-boundary check (from cached METAR gradient candidates)
+try:
+    bfile = Path(CACHE_DIR) / "boundaries_latest.json"
+    if bfile.exists():
+        braw = json.loads(bfile.read_text(encoding="utf-8"))
+        cands = parse_candidates(braw.get("candidates", []))
+        best, dist_km = nearest_candidate(lat, lon, cands)
+        if best is not None and dist_km is not None:
+            st.write(f"Nearest boundary candidate: **{best.kind}** at ({best.lat:.2f}, {best.lon:.2f}) — **{dist_km:.0f} km** away.")
+            if dist_km <= 50:
+                st.warning("Near-boundary environment: initiation/organization risk can increase near surface boundaries.")
+            elif dist_km <= 100:
+                st.info("Somewhat near a boundary: monitor for initiation and storm changes near the boundary zone.")
+    else:
+        st.caption("Boundary proximity: run the Signals tab once to generate boundary candidates.")
+except Exception as e:
+    st.caption(f"Boundary proximity unavailable: {e}")
+
 
         except Exception as e:
             st.error(f"Nowcast failed: {e}")
@@ -332,6 +351,16 @@ with tab_signals:
             units="0–1",
         )
         save_fig(fig, md / "boundary_latest.png")
+# Cache candidates for Nowcast proximity checks
+try:
+    boundaries_file = Path(CACHE_DIR) / "boundaries_latest.json"
+    payload = {"generated_at_utc": datetime.now(timezone.utc).isoformat(), "candidates": [
+        {"lat": c.lat, "lon": c.lon, "score": c.score, "kind": c.kind} for c in candidates
+    ]}
+    boundaries_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+except Exception:
+    pass
+
 
         if candidates:
             st.write("Top boundary candidates:")
