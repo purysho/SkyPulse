@@ -5,81 +5,49 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
+import xarray as xr
 
-from ingest.mrms_aws import find_latest_object, download_and_decompress_grib2
+from ingest.mrms_aws import download_latest_mrms_grib2_gz
 
-MRMS_NPZ = "mrms_reflectivity_latest.npz"
-MRMS_META = "mrms_reflectivity_meta.json"
+META_FILE = "mrms_reflectivity_meta.json"
+DECODED_NC = "mrms_decoded_latest.nc"
 
+def update_mrms_latest(cache_dir: str, *, max_age_minutes: int = 15) -> dict[str, Any]:
+    cache = Path(cache_dir)
+    cache.mkdir(parents=True, exist_ok=True)
+    run = download_latest_mrms_grib2_gz(cache, max_age_minutes=max_age_minutes)
+    meta = {"updated_at_utc": datetime.now(timezone.utc).isoformat(), **run, "decoded": False}
+    (cache / META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return meta
 
-def update_mrms_reflectivity(
-    cache_dir: str | Path,
-    *,
-    region: str = "CONUS",
-    product: str = "MergedReflectivityQCComposite_00.50",
-    max_age_minutes: int = 180,
-) -> dict[str, Any]:
-    """
-    Fetch latest MRMS product from AWS, attempt to decode with cfgrib, and store as NPZ.
-    If cfgrib/eccodes are unavailable (common on Streamlit Cloud), raw GRIB2 is still saved.
-    """
-    cache_dir = Path(cache_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    latest = find_latest_object(region, product)
-    grib_bytes = download_and_decompress_grib2(latest.url)
-
-    raw_path = cache_dir / f"mrms_raw_{latest.timestamp_utc.strftime('%Y%m%d-%H%M%S')}.grib2"
-    raw_path.write_bytes(grib_bytes)
-
-    age_min = abs((datetime.now(timezone.utc) - latest.timestamp_utc).total_seconds()) / 60.0
-
-    meta: dict[str, Any] = {
-        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "region": region,
-        "product": product,
-        "source": "AWS noaa-mrms-pds",
-        "key": latest.key,
-        "url": latest.url,
-        "timestamp_utc": latest.timestamp_utc.isoformat(),
-        "age_minutes": round(age_min, 1),
-        "raw_grib2_path": raw_path.name,
-        "decoded": False,
-        "note": "",
-    }
-
-    if age_min > max_age_minutes:
-        meta["note"] = f"Latest object is older than max_age_minutes={max_age_minutes} (age={age_min:.1f} min)."
+def try_decode_mrms_grib2(cache_dir: str) -> tuple[bool, str]:
+    cache = Path(cache_dir)
+    meta_path = cache / META_FILE
+    if not meta_path.exists():
+        return False, "No MRMS meta found. Click Update MRMS first."
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    raw_path = cache / meta.get("raw_grib2_path", "")
+    if not raw_path.exists():
+        return False, f"Raw GRIB2 not found: {raw_path}"
 
     try:
-        import xarray as xr
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(suffix=".grib2") as f:
-            f.write(grib_bytes)
-            f.flush()
-            da = xr.load_dataarray(f.name, engine="cfgrib", decode_timedelta=True)
-
-        lon_name = "longitude" if "longitude" in da.coords else ("lon" if "lon" in da.coords else None)
-        lat_name = "latitude" if "latitude" in da.coords else ("lat" if "lat" in da.coords else None)
-        if lon_name is None or lat_name is None:
-            raise RuntimeError(f"Could not find lon/lat coords in decoded MRMS data. Coords: {list(da.coords)}")
-
-        lons = np.array(da[lon_name].values, dtype=float)
-        lats = np.array(da[lat_name].values, dtype=float)
-        vals = np.array(da.values, dtype=float)
-
-        # store generic field name (some products are not reflectivity)
-        np.savez_compressed(cache_dir / MRMS_NPZ, lons=lons, lats=lats, field=vals)
-
+        ds = xr.open_dataset(raw_path, engine="cfgrib")
+        out = cache / DECODED_NC
+        ds.to_netcdf(out)
         meta["decoded"] = True
-        meta["note"] = (meta["note"] + " " if meta["note"] else "") + "Decoded using xarray+cfgrib."
+        meta["decoded_path"] = out.name
+        meta["note"] = "Decoded OK via cfgrib -> netcdf"
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return True, "Decoded OK"
     except Exception as e:
-        meta["note"] = (meta["note"] + " " if meta["note"] else "") + (
-            "Decode failed (likely missing cfgrib/eccodes). Raw GRIB2 saved. "
-            f"Error: {e}"
-        )
+        meta["decoded"] = False
+        meta["note"] = f"Decode failed (likely missing cfgrib/eccodes). Raw GRIB2 saved. Error: {e}"
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return False, meta["note"]
 
-    (cache_dir / MRMS_META).write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    return meta
+def detect_mrms_objects(cache_dir: str) -> dict[str, Any]:
+    cache = Path(cache_dir)
+    decoded = cache / DECODED_NC
+    if not decoded.exists():
+        raise RuntimeError("No decoded MRMS file yet. Click 'Try decode (cfgrib)' first.")
+    return {"updated_at_utc": datetime.now(timezone.utc).isoformat(), "objects": []}
